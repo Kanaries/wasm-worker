@@ -37,6 +37,52 @@ impl Scene {
         })
     }
 
+    fn groupby_mean(&self, concurrency: usize, pool: &pool::WorkerPool) -> Result<(), JsValue> {
+        let mut groupby_data = vec![vec![0; 10]; 10];
+
+        //generate random data
+        for i in 0..10 {
+            for j in 0..10 {
+                groupby_data[i][j] = i * 10 + j;
+            }
+        }
+
+        // Configure a rayon thread pool which will pull web workers from
+        // `pool`.
+        let thread_pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(concurrency)
+            .spawn_handler(|thread| Ok(pool.run(|| thread.run()).unwrap()))
+            .build()
+            .unwrap();
+        // And now execute the render! The entire render happens on our worker
+        // threads so we don't lock up the main thread, so we ship off a thread
+        // which actually does the whole rayon business. When our returned
+        // future is resolved we can pull out the final version of the image.
+        let (tx, rx) = oneshot::channel();
+        pool.run(move || {
+            thread_pool.install(|| {
+                // TODO: for groupby
+                groupby_data.par_chunks_mut(1).enumerate().for_each(|(i, chunks)|  {
+                    let mut sum = 0;
+                    for i in &chunks[0] {
+                        sum += i;
+                    }
+                    chunks[0][i] = sum / 10;
+                });
+            });
+            drop(tx.send(groupby_data));
+        })?;
+
+        let _done = async move {
+            match rx.await {
+                Ok(_data) => Ok(()),
+                Err(_) => Err(JsValue::undefined()),
+            }
+        };
+        // TODO handle await
+        Ok(())
+    }
+
     /// Renders this scene with the provided concurrency and worker pool.
     ///
     /// This will spawn up to `concurrency` workers which are loaded from or
@@ -47,6 +93,7 @@ impl Scene {
         concurrency: usize,
         pool: &pool::WorkerPool,
     ) -> Result<RenderingScene, JsValue> {
+        self.groupby_mean(concurrency, pool)?;
         let scene = self.inner;
         let height = scene.height;
         let width = scene.width;
@@ -96,7 +143,7 @@ impl Scene {
                 Err(_) => Err(JsValue::undefined()),
             }
         };
-
+        
         Ok(RenderingScene {
             promise: wasm_bindgen_futures::future_to_promise(done),
             base,

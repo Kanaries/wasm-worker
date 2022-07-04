@@ -1,3 +1,4 @@
+use quad_rand as qrand;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -61,6 +62,35 @@ pub fn startup() {
     setup_button_click_callback(worker_handle2);
 }
 
+fn generate_data(width: usize, height: usize) -> Vec<Vec<String>> {
+    console::log_1(&"generating data".into());
+    let mut data = Vec::new();
+    for _ in 0..height {
+        let mut row = Vec::new();
+        for _ in 0..width {
+            let mut str = String::new();
+            for _ in 0..10 {
+                str.push(qrand::gen_range(64, 128).into());
+            }
+            row.push(str)
+        }
+        data.push(row)
+    }
+    console::log_1(&"generated data".into());
+    data
+}
+
+// no generic type parameter, no func
+fn group_by(group_data: Vec<Vec<String>>, num: usize) -> Vec<Vec<Vec<String>>> {
+    let mut map: HashMap<&str, Vec<Vec<String>>> = HashMap::new();
+    group_data.iter().for_each(|v| {
+        map.entry(v[num].as_str())
+            .or_insert(Vec::new())
+            .push(v.to_owned());
+    });
+    map.into_values().map(|v| v.into_iter().collect()).collect()
+}
+
 fn setup_button_click_callback(_worker: Rc<RefCell<Worker>>) {
     let document = web_sys::window().unwrap().document().unwrap();
 
@@ -70,30 +100,9 @@ fn setup_button_click_callback(_worker: Rc<RefCell<Worker>>) {
     let callback = Closure::wrap(Box::new(move || {
         console::log_1(&"button click callback triggered".into());
 
-        // no generic type parameter, no func
-        fn group_by(xs: Vec<(&str, i32)>) -> Vec<Vec<(String, i32)>> {
-            let mut map: HashMap<&str, Vec<(String, i32)>> = HashMap::new();
-            xs.iter().for_each(|(s, i)| {
-                map.entry(s).or_insert(Vec::new()).push((s.to_string(), *i));
-            });
-            map.into_values().map(|v| v.into_iter().collect()).collect()
-        }
+        let groupby_data = generate_data(100, 10000);
+        let res = group_by(groupby_data, 0);
 
-        let groupby_data = vec![
-            ("abc", 0),
-            ("edf", 1),
-            ("lmn", 2),
-            ("abc", 3),
-            ("edf", 4),
-            ("lmn", 5),
-            ("abc", 6),
-            ("zyx", 7),
-            ("uer", 8),
-        ];
-        let mut res = group_by(groupby_data.clone());
-        for _ in 1..10000 {
-            res = group_by(groupby_data.clone());
-        }
         console::log_1(&format!("{:?}", res).as_str().into());
     }) as Box<dyn FnMut()>);
 

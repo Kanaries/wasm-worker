@@ -1,11 +1,12 @@
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{console, HtmlElement, HtmlInputElement, MessageEvent, Worker};
 
 /// A number evaluation struct
-/// 
+///
 /// This struct will be the main object which responds to messages passed to the worker. It stores
 /// the last number which it was passed to have a state. The statefulness is not is not required in
 /// this example but should show how larger, more complex scenarios with statefulness can be set up.
@@ -18,7 +19,9 @@ pub struct NumberEval {
 impl NumberEval {
     /// Create new instance.
     pub fn new(init_number: i32) -> NumberEval {
-        NumberEval{number: init_number}
+        NumberEval {
+            number: init_number,
+        }
     }
 
     /// Get last number that was checked - this method is added to work with statefulness.
@@ -47,14 +50,63 @@ pub fn startup() {
     // with the code in the worker. Therefore, we wrap it in `Rc<RefCell>` following the interior
     // mutability pattern. In this example, it would not be needed but we include the wrapping
     // anyway as example.
-    let worker_handle = Rc::new(RefCell::new(Worker::new("./worker.js").unwrap()));
+    let worker_handle1 = Rc::new(RefCell::new(Worker::new("./worker.js").unwrap()));
+    console::log_1(&"Created a new worker from within WASM".into());
+
+    let worker_handle2 = Rc::new(RefCell::new(Worker::new("./worker.js").unwrap()));
     console::log_1(&"Created a new worker from within WASM".into());
 
     // Pass the worker to the function which sets up the `onchange` callback.
-    setup_input_onchange_callback(worker_handle.clone());
+    setup_input_onchange_callback(worker_handle1);
+    setup_button_click_callback(worker_handle2);
 }
 
+fn setup_button_click_callback(_worker: Rc<RefCell<Worker>>) {
+    let document = web_sys::window().unwrap().document().unwrap();
 
+    #[allow(unused_assignments)]
+    let mut _persistent_callback_handle = get_on_msg_callback();
+
+    let callback = Closure::wrap(Box::new(move || {
+        console::log_1(&"button click callback triggered".into());
+
+        // no generic type parameter, no func
+        fn group_by(xs: Vec<(&str, i32)>) -> Vec<Vec<(String, i32)>> {
+            let mut map: HashMap<&str, Vec<(String, i32)>> = HashMap::new();
+            xs.iter().for_each(|(s, i)| {
+                map.entry(s).or_insert(Vec::new()).push((s.to_string(), *i));
+            });
+            map.into_values().map(|v| v.into_iter().collect()).collect()
+        }
+
+        let groupby_data = vec![
+            ("abc", 0),
+            ("edf", 1),
+            ("lmn", 2),
+            ("abc", 3),
+            ("edf", 4),
+            ("lmn", 5),
+            ("abc", 6),
+            ("zyx", 7),
+            ("uer", 8),
+        ];
+        let mut res = group_by(groupby_data.clone());
+        for _ in 1..10000 {
+            res = group_by(groupby_data.clone());
+        }
+        console::log_1(&format!("{:?}", res).as_str().into());
+    }) as Box<dyn FnMut()>);
+
+    document
+        .get_element_by_id("start")
+        .expect("#start should exist")
+        .dyn_ref::<HtmlElement>()
+        .expect("#inputNumber should be a HtmlInputElement")
+        .set_onclick(Some(callback.as_ref().unchecked_ref()));
+
+    // Leaks memory.
+    callback.forget();
+}
 
 fn setup_input_onchange_callback(worker: Rc<RefCell<web_sys::Worker>>) {
     let document = web_sys::window().unwrap().document().unwrap();
@@ -71,9 +123,11 @@ fn setup_input_onchange_callback(worker: Rc<RefCell<web_sys::Worker>>) {
         console::log_1(&"onchange callback triggered".into());
         let document = web_sys::window().unwrap().document().unwrap();
 
-        let input_field = document.get_element_by_id("inputNumber")
+        let input_field = document
+            .get_element_by_id("inputNumber")
             .expect("#inputNumber should exist");
-        let input_field = input_field.dyn_ref::<HtmlInputElement>()
+        let input_field = input_field
+            .dyn_ref::<HtmlInputElement>()
             .expect("#inputNumber should be a HtmlInputElement");
 
         // If the value in the field can be parsed to a `i32`, send it to the worker. Otherwise
@@ -87,8 +141,9 @@ fn setup_input_onchange_callback(worker: Rc<RefCell<web_sys::Worker>>) {
 
                 // Since the worker returns the message asynchronously, we attach a callback to be
                 // triggered when the worker returns.
-                worker_handle.set_onmessage(Some(persistent_callback_handle.as_ref().unchecked_ref()));
-            },
+                worker_handle
+                    .set_onmessage(Some(persistent_callback_handle.as_ref().unchecked_ref()));
+            }
             Err(_) => {
                 document
                     .get_element_by_id("resultField")
@@ -98,7 +153,6 @@ fn setup_input_onchange_callback(worker: Rc<RefCell<web_sys::Worker>>) {
                     .set_inner_text("");
             }
         }
-
     }) as Box<dyn FnMut()>);
 
     // Attach the closure as `onchange` callback to the input field.
@@ -115,7 +169,7 @@ fn setup_input_onchange_callback(worker: Rc<RefCell<web_sys::Worker>>) {
 
 /// Create a closure to act on the message returned by the worker
 fn get_on_msg_callback() -> Closure<dyn FnMut(MessageEvent)> {
-    let callback = Closure::wrap(Box::new(move |event: MessageEvent | {
+    let callback = Closure::wrap(Box::new(move |event: MessageEvent| {
         console::log_2(&"Received response: ".into(), &event.data().into());
 
         let result = match event.data().as_bool().unwrap() {

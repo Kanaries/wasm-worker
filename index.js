@@ -54,6 +54,7 @@ function run() {
     }
     canvas.width = json.width;
     canvas.height = json.height;
+    test_groupby(new Scene(json));
     render(new Scene(json));
   };
   button.innerText = 'Render!';
@@ -115,6 +116,15 @@ class State {
     clearInterval(this.interval);
     button.disabled = false;
   }
+}
+
+function test_groupby(scene) {
+  test_data = scene.groupby(parseInt(concurrency.value), pool);
+  test_data.promise()
+      .then(data => {
+        console.log(data);
+      })
+      .catch(console.error);
 }
 
 function render(scene) {

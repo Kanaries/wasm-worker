@@ -26,7 +26,7 @@ rustup override set nightly
 rustup target add wasm32-unknown-unknown
 cargo install -f wasm-bindgen-cli
 
-cargo build --target wasm32-unknown-unknown
+cargo build --target wasm32-unknown-unknown --release
 wasm-bindgen target/wasm32-unknown-unknown/release/raytrace_parallel.wasm --out-dir . --target no-modules
 python3 server.py
 ```

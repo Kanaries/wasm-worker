@@ -1,3 +1,5 @@
+#![feature(slice_group_by)]
+
 use futures_channel::oneshot;
 use js_sys::{Promise, Uint8ClampedArray, WebAssembly};
 use rayon::prelude::*;
@@ -36,9 +38,10 @@ impl Scene {
                 .map_err(|e| JsValue::from(e.to_string()))?,
         })
     }
-
-    fn groupby_mean(&self, concurrency: usize, pool: &pool::WorkerPool) -> Result<(), JsValue> {
+    
+    pub fn groupby(self, concurrency: usize, pool: &pool::WorkerPool) -> Result<GroupbyData, JsValue> {
         let mut groupby_data = vec![vec![0; 10]; 10];
+        let mut mean_data = vec![0; 10];
 
         //generate random data
         for i in 0..10 {
@@ -46,6 +49,10 @@ impl Scene {
                 groupby_data[i][j] = i * 10 + j;
             }
         }
+
+        let groupby_fn = |x:&Vec<usize>, y:&Vec<usize>| -> bool {
+            x[0] % 10 == y[0] % 10
+        };
 
         // Configure a rayon thread pool which will pull web workers from
         // `pool`.
@@ -61,26 +68,22 @@ impl Scene {
         let (tx, rx) = oneshot::channel();
         pool.run(move || {
             thread_pool.install(|| {
-                // TODO: for groupby
-                groupby_data.par_chunks_mut(1).enumerate().for_each(|(i, chunks)|  {
-                    let mut sum = 0;
-                    for i in &chunks[0] {
-                        sum += i;
-                    }
-                    chunks[0][i] = sum / 10;
+                groupby_data.group_by(groupby_fn).into_iter().par_bridge().for_each(|x| {
+                    console_log!("{:?}", x);
                 });
             });
             drop(tx.send(groupby_data));
         })?;
 
-        let _done = async move {
+        let done = async move {
             match rx.await {
-                Ok(_data) => Ok(()),
+                Ok(_data) => Ok(0.into()),
                 Err(_) => Err(JsValue::undefined()),
             }
         };
-        // TODO handle await
-        Ok(())
+        Ok(GroupbyData {
+            promise: wasm_bindgen_futures::future_to_promise(done),
+        })
     }
 
     /// Renders this scene with the provided concurrency and worker pool.
@@ -93,7 +96,6 @@ impl Scene {
         concurrency: usize,
         pool: &pool::WorkerPool,
     ) -> Result<RenderingScene, JsValue> {
-        self.groupby_mean(concurrency, pool)?;
         let scene = self.inner;
         let height = scene.height;
         let width = scene.width;
@@ -161,6 +163,20 @@ pub struct RenderingScene {
     promise: Promise,
     width: u32,
     height: u32,
+}
+
+#[wasm_bindgen]
+pub struct GroupbyData {
+    promise: Promise,
+}
+
+
+#[wasm_bindgen]
+impl GroupbyData {
+    /// Returns the JS promise object which resolves when the render is complete
+    pub fn promise(&self) -> Promise {
+        self.promise.clone()
+    }
 }
 
 // Inline the definition of `ImageData` here because `web_sys` uses
